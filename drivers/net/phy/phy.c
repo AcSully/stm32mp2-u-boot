@@ -214,6 +214,71 @@ int genphy_config_aneg(struct phy_device *phydev)
 	return result;
 }
 
+/*********************alientek add start***************************/
+#define YT8531_REG_DEBUG_ADDR_OFFSET		0x1e
+#define YT8531_REG_DEBUG_DATA				0x1f
+
+static int yt8531_rd_ext(struct phy_device *phydev, u32 regnum)
+{
+	int val;
+
+	phy_write(phydev, MDIO_DEVAD_NONE, YT8531_REG_DEBUG_ADDR_OFFSET, regnum);
+	val = phy_read(phydev, MDIO_DEVAD_NONE, YT8531_REG_DEBUG_DATA);
+	
+	return val;
+}
+
+static int yt8531_wr_ext(struct phy_device *phydev, u32 regnum, u16 val)
+{
+	int ret;
+
+	ret = phy_write(phydev, MDIO_DEVAD_NONE, YT8531_REG_DEBUG_ADDR_OFFSET, regnum);
+	ret = phy_write(phydev, MDIO_DEVAD_NONE, YT8531_REG_DEBUG_DATA, val);
+	
+	return ret;
+}
+
+int yt8531_xtal_init(struct phy_device *phydev)
+{
+	int ret = 0;
+	int val = 0;
+
+	mdelay(50);
+
+	do {
+		ret = yt8531_wr_ext(phydev, 0xa012, 0x88);
+		if (ret < 0)
+			return ret;
+
+		mdelay(100);
+
+		val = yt8531_rd_ext(phydev, 0xa012);
+		if (val < 0)
+			return val;
+
+		mdelay(20);
+	} while (val != 0x88);
+
+	ret = yt8531_wr_ext(phydev, 0xa012, 0xd0); //125MHz
+	if (ret < 0)
+		return ret;
+
+	return ret;
+}
+
+void yt8531_led_init(struct phy_device *phydev)
+{
+	yt8531_wr_ext(phydev, 0xa00e, 0x2600);	//yellow led blink
+	yt8531_wr_ext(phydev, 0xa00d, 0x70);	//10_100M_1000M green led always light
+}
+
+void yt8531_delay_init(struct phy_device *phydev)
+{
+	yt8531_wr_ext(phydev, 0xa001, 0x8100);	//TXC/RXC: 2ns delays
+	yt8531_wr_ext(phydev, 0xa003, 0x0002);	//RGMII TX_CLK delay: 300ps delays
+}
+/*********************alientek add end***************************/
+
 /**
  * genphy_update_link - update link status in @phydev
  * @phydev: target phy_device struct
@@ -226,6 +291,25 @@ int genphy_update_link(struct phy_device *phydev)
 {
 	unsigned int mii_reg;
 
+	/************alientek add start********/
+	int ret = 0;
+	unsigned int phyid1, phyid2;
+
+	phyid1 = phy_read(phydev, MDIO_DEVAD_NONE, MII_PHYSID1);
+	phyid2 = phy_read(phydev, MDIO_DEVAD_NONE, MII_PHYSID2);
+	if((phyid1 == 0x4f51) && (phyid2 == 0xe91b)) { //YT8531 ID
+		ret = yt8531_xtal_init(phydev);
+		if (ret < 0)
+		{
+			printf("yt8531_xtal_init failed.\r\n");
+			return ret;
+		}
+
+		yt8531_led_init(phydev);
+		yt8531_delay_init(phydev);
+	}
+	/************alientek add end********/
+	
 	/*
 	 * Wait if the link is up, and autonegotiation is in progress
 	 * (ie - we're capable and it's not done)
