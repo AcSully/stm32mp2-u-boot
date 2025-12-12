@@ -170,6 +170,13 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 	int	err;
 	int	disable_relocation = 0;
 
+#ifdef ALIENTEK_MIPI_RGB_LCD
+	int nodeoffset_dsi;
+	int nodeoffset_rgb;
+    int dsi_timings_id; 
+    int rgb_timings_id;
+#endif
+
 	/* nothing to do */
 	if (*of_size == 0)
 		return 0;
@@ -178,6 +185,27 @@ int boot_relocate_fdt(struct lmb *lmb, char **of_flat_tree, ulong *of_size)
 		fdt_error("image is not a fdt");
 		goto error;
 	}
+
+#ifdef ALIENTEK_MIPI_RGB_LCD
+	dsi_timings_id = (int)((*(env_get("dsi_lcd_id"))) - '0');
+	if (dsi_timings_id == 2 || dsi_timings_id == 3 || dsi_timings_id == 4) {
+		nodeoffset_dsi = fdt_path_offset(fdt_blob, "/dsi_lcd_id");
+		if (nodeoffset_dsi < 0) {
+			printf("cannot find /dsi_lcd_id in linux kernel fdtfile\n");
+		}
+		fdt_setprop_u32(fdt_blob, nodeoffset_dsi, "dsi_select_id", dsi_timings_id);
+	} else { //no mipi lcd, detect rgb lcd
+		rgb_timings_id = (int)((*(env_get("rgb_lcd_id"))) - '0');
+		if (rgb_timings_id == 1 || rgb_timings_id == 2 || rgb_timings_id == 4 
+			|| rgb_timings_id == 5) {
+			nodeoffset_rgb = fdt_path_offset(fdt_blob, "/rgb_lcd_id");
+			if (nodeoffset_rgb < 0) {
+				printf("cannot find /rgb_lcd_id in linux kernel fdtfile\n");
+			}
+			fdt_setprop_u32(fdt_blob, nodeoffset_rgb, "rgb_select_id", rgb_timings_id);
+		}
+	}
+#endif
 
 	/* position on a 4K boundary before the alloc_current */
 	/* Pad the FDT by a specified amount */

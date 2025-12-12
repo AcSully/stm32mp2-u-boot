@@ -611,6 +611,275 @@ int mmc_get_env_dev(void)
 	return mmc_get_boot();
 }
 
+/******************** ALIENTEK ADD START ********************/
+#ifdef ALIENTEK_MIPI_RGB_LCD
+#include <adc.h>
+#define GOODIX_REG_ID	0x8140
+#define GOODIX_ID_LEN	4
+
+static const struct udevice_id atk_touchscreen_ids[] = {
+	{ .compatible = "alientek,mipi-ts", },
+	{ .compatible = "alientek,rgb-ts", },
+	{ }
+};
+
+U_BOOT_DRIVER(atk_touchscreen) = {
+	.name		= "atk_touchscreen",
+	.id		= UCLASS_I2C_GENERIC,
+	.of_match	= atk_touchscreen_ids,
+};
+
+int goodix_reset_irq_gpio(ofnode node)
+{
+	struct gpio_desc reset_gpio;
+	struct gpio_desc irq_gpio;
+
+	gpio_request_by_name_nodev(node, "reset-gpios", 0, &reset_gpio, GPIOD_IS_OUT);
+	gpio_request_by_name_nodev(node, "irq-gpios", 0, &irq_gpio, GPIOD_IS_OUT);
+
+	if(!dm_gpio_is_valid(&reset_gpio)) {
+		printf("%s: cannot get goodix reset-gpios\n", __func__);
+		return -1;
+	}
+
+	if(!dm_gpio_is_valid(&irq_gpio)) {
+		printf("%s: cannot get goodix irq-gpios\n", __func__);
+		return -1;
+	}
+
+	dm_gpio_set_value(&reset_gpio, false);	//set reset gpio low
+	mdelay(40);
+
+	dm_gpio_set_value(&irq_gpio, true);		//set irq gpio high
+	mdelay(1);
+
+	dm_gpio_set_value(&reset_gpio, true);	//set reset gpio high
+	mdelay(40);
+
+	dm_gpio_free(NULL, &reset_gpio);
+	dm_gpio_free(NULL, &irq_gpio);
+	return 0;
+}
+
+int detect_alientek_mipi_lcd_touchscreen(void)
+{
+	ofnode node;
+	char id[GOODIX_ID_LEN] = {0};
+	int ret;
+
+	node = ofnode_by_compatible(ofnode_null(), "alientek,mipi-ts");
+	if(!ofnode_valid(node)) {
+		printf("cannot find alientek,mipi-ts compatible\n");
+		return -1;
+	}
+
+	ret = goodix_reset_irq_gpio(node);
+	if(ret) {
+		printf("error mipi lcd goodix_reset_irq_gpio\n");
+		return -1;
+	}
+
+	ret = i2c_read(node, GOODIX_REG_ID, id, sizeof(id), 2);
+	if((!strncmp(id, "911", sizeof(id))) || (!strncmp(id, "1151", sizeof(id))) 
+		|| (!strncmp(id, "9271", sizeof(id))) || (!strncmp(id, "9147", sizeof(id)))
+			|| (!strncmp(id, "928", sizeof(id))) || (!strncmp(id, "1158", sizeof(id)))) {
+			return 0;
+	}
+	
+	return -1;
+}
+
+int detect_alientek_rgb_lcd_touchscreen(void)
+{
+	ofnode node;
+	char id[GOODIX_ID_LEN] = {0};
+	int ret;
+
+	node = ofnode_by_compatible(ofnode_null(), "alientek,rgb-ts");
+	if(!ofnode_valid(node)) {
+		printf("cannot find alientek,rgb-ts compatible\n");
+		return -1;
+	}
+
+	ret = goodix_reset_irq_gpio(node);
+	if(ret) {
+		printf("error rgb lcd goodix_reset_irq_gpio\n");
+		return -1;
+	}
+
+	ret = i2c_read(node, GOODIX_REG_ID, id, sizeof(id), 2);
+	if((!strncmp(id, "911", sizeof(id))) || (!strncmp(id, "1151", sizeof(id))) 
+		|| (!strncmp(id, "9271", sizeof(id))) || (!strncmp(id, "9147", sizeof(id)))
+			|| (!strncmp(id, "928", sizeof(id))) || (!strncmp(id, "1158", sizeof(id)))) {
+			return 0;
+	}
+
+	return -1;
+}
+
+int alientek_set_rgb_lcd(void)
+{
+    ofnode node;
+    int ret, i;
+    struct gpio_desc priv_rgb[3];
+    unsigned int read_id = 0;
+	unsigned int rgb_lcd_id = 0;
+	int ts_valid = -1;
+
+    node = ofnode_path("/rgb_lcd_id_pinctrl");
+    if(!ofnode_valid(node)) {
+        printf("%s: cannot find /rgb_lcd_id_pinctrl node\n", __func__);
+        return -1;
+    }
+
+    ret = gpio_request_by_name_nodev(node, "gpior", 0,&priv_rgb[0], GPIOD_IS_IN);
+    if(ret) {
+        printf("%s: cannot get GPIO: ret=%d\n", __func__, ret);
+        return -1;
+    }
+
+    ret = gpio_request_by_name_nodev(node, "gpiog", 0,&priv_rgb[1], GPIOD_IS_IN);
+    if(ret) {
+        printf("%s: cannot get GPIO: ret=%d\n", __func__, ret);
+        return -1;
+    }
+
+    ret = gpio_request_by_name_nodev(node, "gpiob", 0,&priv_rgb[2], GPIOD_IS_IN);
+    if(ret) {
+        printf("%s: cannot get GPIO: ret=%d\n", __func__, ret);
+        return -1;
+    }
+
+	ts_valid = detect_alientek_rgb_lcd_touchscreen();
+	if(!ts_valid) {
+		for(i = 0; i < 3; i++) {
+			ret = dm_gpio_get_value(&priv_rgb[i]);
+			if(!ret)
+				read_id |= (0x1 << i);
+		}
+		//printf("alientek rgb_lcd_id: %d\n", read_id);
+		switch(read_id) {
+			case 1:	//atk_rgb_lcd_7_800x480
+				rgb_lcd_id = 1;
+				env_set("rgb_lcd_id", "1");	
+				break;
+			case 2:	//atk_rgb_lcd_7_1024x600
+				rgb_lcd_id = 2;
+				env_set("rgb_lcd_id", "2");	
+				break;
+			case 4:	//atk_rgb_lcd_4.3_800x480
+				rgb_lcd_id = 4;
+				env_set("rgb_lcd_id", "4");	
+				break;			
+			case 5:	//atk_rgb_lcd_10.1_1280x800
+				rgb_lcd_id = 5;
+				env_set("rgb_lcd_id", "5");	
+				break;
+			default :
+				rgb_lcd_id = 0;
+				env_set("rgb_lcd_id", "0");	
+				break;
+		}
+	} else {
+		rgb_lcd_id = 0;
+		env_set("rgb_lcd_id", "0");	
+		printf("Invalid detect_alientek_rgb_lcd_touchscreen\n");
+	}
+
+    gpio_free_list_nodev(&priv_rgb[0], 3);
+    return rgb_lcd_id;
+}
+
+int adc_mipi_dsi_lcd_measurement(ofnode node, unsigned int *adc_value)
+{
+	struct ofnode_phandle_args adc_args;
+	struct udevice *adc;
+	unsigned int raw;
+	int ret, uV, mV;
+	unsigned int times, adc_average_value, adc_sum = 0;
+
+	if(ofnode_parse_phandle_with_args(node, "st,adc_mipi_dsi_lcd_id",
+						"#io-channel-cells", 0, 0,
+						&adc_args)) {
+		printf("cannot find /config/st,adc_mipi_dsi_lcd_id\n");
+		return -1;
+	}
+
+	ret = uclass_get_device_by_ofnode(UCLASS_ADC, adc_args.node, &adc);
+	if(ret) {
+		printf("cannot get adc device(%d)\n", ret);
+		return -1;
+	}
+
+	for(times = 0; times < 5; times++) {
+		ret = adc_channel_single_shot(adc->name, adc_args.args[0], &raw);
+		if(ret) {
+			printf("single shot failed for %s[%d]!\n",
+				adc->name, adc_args.args[0]);
+			return -1;
+		}
+		if(!adc_raw_to_uV(adc, raw, &uV)) {
+			mV = uV / 1000;
+		} else {
+			printf("cannot get uV value for %s[%d]\n",
+				adc->name, adc_args.args[0]);
+			return -1;
+		}
+		adc_sum +=  mV;
+	}
+
+	adc_average_value = adc_sum / times;
+	*adc_value = adc_average_value;
+	//printf("adc_mipi_dsi_lcd = %d mV\n", *adc_value);
+	return 0;
+}
+
+int alientek_set_mipi_lcd(void)
+{
+	int ret;
+	int dsi_lcd_id = 1; //atk_no_mipi
+	int ts_valid = -1;
+	unsigned int adc_value = 0;
+	ofnode node;
+
+	node = ofnode_path("/config_adc_mipi_dsi_lcd_id");
+	if(!ofnode_valid(node)) {
+		log_debug("cannot find /config_adc_mipi_dsi_lcd_id node\n");
+		return -ENOENT;
+	}
+
+	ts_valid = detect_alientek_mipi_lcd_touchscreen();
+	if(!ts_valid) {
+		ret = adc_mipi_dsi_lcd_measurement(node, &adc_value);
+		if(ret) {
+			return -1;
+		}
+		if(adc_value > 500 && adc_value < 700) { //atk_mipi_dsi_5x5_720x1280
+			dsi_lcd_id = 2;
+			env_set("dsi_lcd_id", "2");
+		} else if(adc_value > 800 && adc_value < 1000) { //atk_mipi_dsi_5x5_1080x1920
+			dsi_lcd_id = 3;
+			env_set("dsi_lcd_id", "3");
+		} else if(adc_value > 1150 && adc_value < 1350) { //atk_mipi_dsi_10x1_800x1280
+			dsi_lcd_id = 4;
+			env_set("dsi_lcd_id", "4");
+		} else { //atk_no_mipi
+			dsi_lcd_id = 1;
+			env_set("dsi_lcd_id", "1");
+		}
+		//printf("alientek dsi_lcd_id: %d\n", dsi_lcd_id);
+	} else {
+		dsi_lcd_id = 1;
+		env_set("dsi_lcd_id", "1");
+		printf("Invalid detect_alientek_mipi_lcd_touchscreen\n");
+	}
+
+	return dsi_lcd_id;
+}
+
+#endif
+/******************** ALIENTEK ADD END ********************/
+
 int board_late_init(void)
 {
 	const void *fdt_compat;
@@ -641,6 +910,16 @@ int board_late_init(void)
 			}
 		}
 	}
+
+/******************** ALIENTEK ADD START ********************/
+#ifdef ALIENTEK_MIPI_RGB_LCD
+	int ret;
+	ret = alientek_set_mipi_lcd();
+	if(ret < 0 || ret == 1) { //no mipi lcd, detect rgb lcd
+		alientek_set_rgb_lcd();
+	}
+#endif
+/******************** ALIENTEK ADD end ********************/
 
 	return 0;
 }

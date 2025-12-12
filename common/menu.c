@@ -17,6 +17,10 @@
 
 #define ansi 1
 
+#ifdef ALIENTEK_MIPI_RGB_LCD
+#include <env.h>
+#endif
+
 /*
  * Internally, each item in a menu is represented by a struct menu_item.
  *
@@ -198,8 +202,13 @@ static inline int menu_interactive_choice(struct menu *m, void **choice)
 		menu_display(m);
 
 		if (!m->item_choice) {
+#ifdef ALIENTEK_MIPI_RGB_LCD
+			readret = cli_readline_into_buffer("Enter choice(For ALIENTEK LVDS LCD, enter number; \
+						Otherwise, automatically select default, do not enter): ",cbuf, m->timeout);
+#else	
 			readret = cli_readline_into_buffer("Enter choice: ",
 							   cbuf, m->timeout);
+#endif
 
 			if (readret >= 0) {
 				choice_item = menu_item_by_key(m, cbuf);
@@ -252,6 +261,22 @@ int menu_default_set(struct menu *m, char *item_key)
 		return -ENOENT;
 
 	m->default_item = item;
+
+#ifdef ALIENTEK_MIPI_RGB_LCD
+    int dsi_timings_id;
+    int rgb_timings_id;
+
+	dsi_timings_id = (int)((*(env_get("dsi_lcd_id"))) - '0');
+	if (dsi_timings_id == 2 || dsi_timings_id == 3 || dsi_timings_id == 4) {
+		m->default_item = menu_item_by_key(m, "3");
+	} else { //no mipi lcd, detect rgb lcd
+		rgb_timings_id = (int)((*(env_get("rgb_lcd_id"))) - '0');
+		if (rgb_timings_id == 1 || rgb_timings_id == 2 || rgb_timings_id == 4 
+			|| rgb_timings_id == 5) {
+			m->default_item = menu_item_by_key(m, "2");
+		}
+	}
+#endif
 
 	return 1;
 }
